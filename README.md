@@ -4,7 +4,7 @@
   <p><strong>西南交通大学利兹学院自己的开球网</strong></p>
   <p>以球会友，记录每一场进步。其他学校、学院、机构和俱乐部也能自行部署使用。</p>
   <p>Self-hosted table tennis ratings, matchmaking, doubles and tournaments for schools and clubs.</p>
-  <p><a href="LICENSE">MIT License</a> · Python 3.12+ · SQLite · Mobile first · Docker / Linux VPS</p>
+  <p><a href="LICENSE">MIT License</a> · Python 3.12+ · SQLite · Mobile first · Docker / Linux</p>
 </div>
 
 OpenChinaTT 起源于西南交通大学利兹学院的乒乓球社区需求：让大家自由注册、约球、确认赛果、查看积分和战绩，也让管理员能组织周赛与选拔赛。
@@ -97,7 +97,7 @@ docker compose cp web:/data/backup.sqlite3 ./backup.sqlite3
 
 `TT_ADMIN_NAME` 和 `TT_ADMIN_EMAIL` 用于首次bootstrap，修改它们不会重命名或重置已有管理员。
 
-## Linux VPS部署
+## 部署
 
 示例文件在 [`deploy/`](deploy/)：
 
