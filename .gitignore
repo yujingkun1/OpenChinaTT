@@ -1,0 +1,16 @@
+.env
+.env.*
+!.env.example
+.venv/
+.work/
+data/
+backups/
+__pycache__/
+*.py[cod]
+*.sqlite3*
+*.db*
+*.pem
+*.key
+*.tar.gz
+.DS_Store
+管理员账号.txt

@@ -1,0 +1,15 @@
+.git
+.github
+.venv
+.work
+.env
+.env.*
+data
+backups
+__pycache__
+*.pyc
+*.sqlite3*
+*.db*
+*.pem
+*.key
+*.tar.gz

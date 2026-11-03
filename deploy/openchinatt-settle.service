@@ -1,0 +1,15 @@
+[Unit]
+Description=Settle OpenChinaTT daily ratings
+[Service]
+Type=oneshot
+User=openchinatt
+Group=openchinatt
+WorkingDirectory=/opt/openchinatt/current
+EnvironmentFile=/etc/openchinatt.env
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/opt/openchinatt/venv/bin/python -m app.manage settle
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/openchinatt
+UMask=0077

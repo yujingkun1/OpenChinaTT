@@ -1,0 +1,8 @@
+[Unit]
+Description=OpenChinaTT midnight rating settlement
+[Timer]
+OnCalendar=*-*-* 00:00:00 Asia/Shanghai
+AccuracySec=1s
+Persistent=true
+[Install]
+WantedBy=timers.target

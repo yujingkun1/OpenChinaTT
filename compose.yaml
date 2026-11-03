@@ -1,0 +1,32 @@
+services:
+  web:
+    build: .
+    image: openchinatt:local
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      TT_HOST: 0.0.0.0
+      TT_DATA: /data
+    ports:
+      - "127.0.0.1:8097:8097"
+    volumes:
+      - club-data:/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; from app import config; urllib.request.urlopen('http://127.0.0.1:8097'+config.BASE+'/api/ready', timeout=5)"]
+      interval: 30s
+      timeout: 6s
+      retries: 3
+  settler:
+    image: openchinatt:local
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      TT_DATA: /data
+    volumes:
+      - club-data:/data
+    command: ["python", "-m", "app.scheduler"]
+    depends_on:
+      web:
+        condition: service_healthy
+volumes:
+  club-data:

@@ -1,0 +1,22 @@
+[Unit]
+Description=OpenChinaTT club website
+After=network.target
+[Service]
+Type=simple
+User=openchinatt
+Group=openchinatt
+WorkingDirectory=/opt/openchinatt/current
+EnvironmentFile=/etc/openchinatt.env
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/opt/openchinatt/venv/bin/python -m app.server
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/openchinatt
+UMask=0077
+MemoryMax=192M
+[Install]
+WantedBy=multi-user.target
