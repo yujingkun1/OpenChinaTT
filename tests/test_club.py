@@ -7,7 +7,7 @@ import unittest
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime,timedelta,timezone
 from pathlib import Path
-from app import api,config,db,ratings
+from app import api,config,db,events,ratings
 from app.security import hash_password,digest,AppError
 from app.server import application
 
@@ -307,6 +307,42 @@ class ClubTests(unittest.TestCase):
         with self.assertRaises(AppError):self.call(f'/events/{eid}/seeds',{'seeds':[{'user_id':2,'seed':1},{'user_id':3,'seed':1}]},1)
         self.call(f'/events/{eid}/draw',{},1)
         with self.assertRaises(AppError):self.call(f'/events/{eid}/join',{},5)
+    def test_capped_round_robin_starts_on_time_and_finishes_without_knockout(self):
+        future = (datetime.now(timezone.utc)+timedelta(hours=1)).isoformat()
+        eid = self.call('/events',{'title':'测试大循环','kind':'weekly','venue':'测试球馆','starts_at':future,
+            'best_of':5,'group_count':1,'qualifiers':0,'rating_ceiling':1600},1)['id']
+        with db.transaction() as c:
+            c.execute('UPDATE users SET rating=1600 WHERE id=6')
+        with self.assertRaises(AppError):
+            self.call(f'/events/{eid}/join',{},6)
+        for uid in [2,3,4]:
+            self.call(f'/events/{eid}/join',{},uid)
+        with self.assertRaises(AppError), db.transaction() as c:
+            events.start_round_robin(c,eid)
+        with db.transaction() as c:
+            past = (datetime.now(timezone.utc)-timedelta(minutes=1)).isoformat()
+            c.execute('UPDATE events SET starts_at=? WHERE id=?',(past,eid))
+        with self.assertRaises(AppError):
+            self.call(f'/events/{eid}/join',{},5)
+        with db.transaction() as c:
+            self.assertEqual(events.start_round_robin(c,eid)['status'],'groups')
+            self.assertEqual(events.start_round_robin(c,eid),{'status':'groups'})
+        event = self.call(f'/events/{eid}',uid=None)
+        self.assertEqual({frozenset([m['a_id'],m['b_id']]) for m in event['matches']},
+                         {frozenset([2,3]),frozenset([2,4]),frozenset([3,4])})
+        self.assertEqual(len(event['matches']),3)
+        self.assertFalse(event['registration_open'])
+        with self.assertRaises(AppError):
+            self.call(f'/events/{eid}/advance',{'qualifiers':2},1)
+        for m in event['matches']:
+            self.assertEqual(m['best_of'],5)
+            self.report(m['id'],m['a_id'],[[11,4],[11,5],[11,6]])
+            self.call(f'/matches/{m["id"]}',{'action':'confirm'},m['b_id'])
+        event = self.call(f'/events/{eid}',uid=None)
+        self.assertEqual(event['status'],'completed')
+        self.assertEqual(event['champion_id'],event['groups'][0]['standings'][0]['user_id'])
+        self.assertEqual(event['bracket'],[])
+        self.assertEqual([self.rating(uid) for uid in [2,3,4]],[1500,1500,1500])
     def test_relationship_boards_and_two_week_changes(self):
         mid=self.match();self.report(mid);self.call('/matches/'+str(mid),{'action':'confirm'},3)
         before=self.call('/analytics',uid=None)

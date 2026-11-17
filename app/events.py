@@ -17,16 +17,23 @@ def get(c,eid):
     require(e,'赛事不存在',404)
     return e
 
+def registration_open(event):
+    return event['status'] == 'open' and (
+        event['qualifiers'] != 0 or datetime.now(timezone.utc) < datetime.fromisoformat(event['starts_at'])
+    )
+
 def public(c,eid):
     e=dict(get(c,eid))
+    e['registration_open'] = registration_open(e)
     e['entries']=[dict(r) for r in c.execute('SELECT e.*,u.name,u.avatar_version,u.rating FROM event_entries e JOIN users u ON u.id=e.user_id WHERE event_id=? ORDER BY coalesce(seed,999999),e.id',(eid,))]
     e['matches']=[dict(r) for r in c.execute('''SELECT m.*,a.name a_name,b.name b_name,a.avatar_version a_avatar_version,b.avatar_version b_avatar_version,x.event_id,x.phase,x.group_no,x.round_no,x.slot FROM event_matches x JOIN matches m ON m.id=x.match_id JOIN users a ON a.id=m.a_id JOIN users b ON b.id=m.b_id WHERE x.event_id=? ORDER BY x.phase,x.group_no,x.round_no,x.slot,m.id''',(eid,))]
-    e['groups']=[{'number':i,'standings':standings(c,eid,i)} for i in range(e['group_count'])] if e['status']!='open' else []
+    e['groups']=[{'number':i,'standings':standings(c,eid,i)} for i in range(e['group_count'])] if any(p['group_no'] is not None for p in e['entries']) else []
     e['bracket']=[dict(r) for r in c.execute('SELECT * FROM event_bracket WHERE event_id=? ORDER BY round_no,slot',(eid,))]
     return e
 
 def list_events(c):
-    return [dict(r) for r in c.execute('''SELECT e.*,(SELECT count(*) FROM event_entries x WHERE x.event_id=e.id) participants,u.name champion_name FROM events e LEFT JOIN users u ON u.id=e.champion_id ORDER BY e.id DESC LIMIT 100''')]
+    rows = c.execute('''SELECT e.*,(SELECT count(*) FROM event_entries x WHERE x.event_id=e.id) participants,u.name champion_name FROM events e LEFT JOIN users u ON u.id=e.champion_id ORDER BY e.id DESC LIMIT 100''')
+    return [dict(r, registration_open=registration_open(r)) for r in rows]
 
 def create(c,u,b):
     title=text(b.get('title'),'赛事名称',60,2)
@@ -38,14 +45,18 @@ def create(c,u,b):
     except ValueError:raise AppError('比赛时间格式错误')
     groups=b.get('group_count',2);q=b.get('qualifiers',2);best=b.get('best_of',5)
     require(type(groups)==int and 1<=groups<=16,'小组数应为1–16')
-    require(type(q)==int and 1<=q<=8,'每组晋级人数应为1–8')
+    require(type(q)==int and 0<=q<=8,'每组晋级人数应为0–8')
+    require(q!=0 or groups==1,'大循环赛事须设为一组')
     require(type(best)==int and best in [3,5,7],'请选择有效赛制')
-    eid=c.execute('INSERT INTO events(title,kind,venue,starts_at,best_of,group_count,qualifiers,description,created_by) VALUES(?,?,?,?,?,?,?,?,?)',(title,kind,venue,date,best,groups,q,text(b.get('description',''),'赛事说明',500),u['id'])).lastrowid
+    ceiling = b.get('rating_ceiling')
+    require(ceiling is None or (type(ceiling)==int and 1<=ceiling<=9999),'报名积分上限应为1–9999')
+    eid=c.execute('INSERT INTO events(title,kind,venue,starts_at,best_of,group_count,qualifiers,description,created_by,rating_ceiling) VALUES(?,?,?,?,?,?,?,?,?,?)',(title,kind,venue,date,best,groups,q,text(b.get('description',''),'赛事说明',500),u['id'],ceiling)).lastrowid
     audit(c,u['id'],'event.create',eid)
     return {'id':eid,'message':'赛事已创建，球友现在可以报名'}
 
 def fixture(c,e,a,b,phase,group=None,round_no=None,slot=None):
-    mid=c.execute("INSERT INTO matches(a_id,b_id,status,best_of,venue,scheduled_at,note) VALUES(?,?,'accepted',?,?,?,?)",(a,b,e['best_of'],e['venue'],e['starts_at'],f"赛事：{e['title']} · "+('小组赛' if phase=='group' else '淘汰赛'))).lastrowid
+    label = '大循环' if e['qualifiers'] == 0 else {'group':'小组赛','knockout':'淘汰赛'}[phase]
+    mid=c.execute("INSERT INTO matches(a_id,b_id,status,best_of,venue,scheduled_at,note) VALUES(?,?,'accepted',?,?,?,?)",(a,b,e['best_of'],e['venue'],e['starts_at'],f"赛事：{e['title']} · {label}")).lastrowid
     c.execute('INSERT INTO event_matches VALUES(?,?,?,?,?,?)',(e['id'],mid,phase,group,round_no,slot))
     return mid
 
@@ -86,23 +97,48 @@ def progress(c,eid):
 
 def match_changed(c,mid):
     linked=c.execute('SELECT event_id FROM event_matches WHERE match_id=?',(mid,)).fetchone()
-    if linked:progress(c,linked['event_id'])
+    if not linked:
+        return
+    eid = linked['event_id']
+    event = get(c,eid)
+    if event['qualifiers'] == 0 and event['status'] == 'groups':
+        unfinished = c.execute("SELECT 1 FROM event_matches x JOIN matches m ON m.id=x.match_id WHERE x.event_id=? AND m.status!='completed' LIMIT 1",(eid,)).fetchone()
+        if not unfinished:
+            champion = standings(c,eid,0)[0]['user_id']
+            c.execute("UPDATE events SET status='completed',champion_id=? WHERE id=?",(champion,eid))
+        return
+    progress(c,eid)
+
+def start_round_robin(c,eid):
+    event = get(c,eid)
+    require(event['qualifiers']==0,'只能定时开启大循环赛事',409)
+    if event['status']!='open':
+        return {'status':event['status']}
+    require(not registration_open(event),'尚未到赛事开赛时间',409)
+    actor = c.execute("SELECT * FROM users WHERE id=? AND role='admin' AND active=1",(event['created_by'],)).fetchone()
+    require(actor,'赛事创建者需要有效的管理员权限',403)
+    count = c.execute('SELECT count(*) FROM event_entries e JOIN users u ON u.id=e.user_id WHERE e.event_id=? AND u.active=1',(eid,)).fetchone()[0]
+    if count < 2:
+        return {'status':'cancelled',**action(c,actor,eid,'cancel',{'reason':'开赛时有效报名人数不足两人'})}
+    return {'status':'groups',**action(c,actor,eid,'draw',{})}
 
 def guard_void(c,mid):
-    linked=c.execute('SELECT x.phase,e.status FROM event_matches x JOIN events e ON e.id=x.event_id WHERE x.match_id=?',(mid,)).fetchone()
-    if linked:require(linked['phase']=='group' and linked['status']=='groups','此赛果已进入赛事晋级链，不能单独作废；可在赛事管理中取消整场赛事',409)
+    linked=c.execute('SELECT x.phase,e.status,e.qualifiers FROM event_matches x JOIN events e ON e.id=x.event_id WHERE x.match_id=?',(mid,)).fetchone()
+    if linked:require(linked['qualifiers']!=0 and linked['phase']=='group' and linked['status']=='groups','此赛事赛果不能单独作废；可在赛事管理中取消整场赛事',409)
 
 def action(c,u,eid,op,b):
     e=get(c,eid)
     if op in ['join','leave']:
-        require(e['status']=='open','分组已生成，报名已结束',409)
+        require(registration_open(e),'赛事报名已结束',409)
         if op=='join':
+            ceiling=e['rating_ceiling']
+            require(ceiling is None or u['rating']<ceiling,f'报名时个人积分须低于{ceiling}分',409)
             require(c.execute('SELECT count(*) FROM event_entries WHERE event_id=?',(eid,)).fetchone()[0]<128,'赛事人数已满')
             require(not c.execute('SELECT id FROM event_entries WHERE event_id=? AND user_id=?',(eid,u['id'])).fetchone(),'你已经报名',409)
             c.execute('INSERT INTO event_entries(event_id,user_id) VALUES(?,?)',(eid,u['id']))
         else:c.execute('DELETE FROM event_entries WHERE event_id=? AND user_id=?',(eid,u['id']))
         audit(c,u['id'],'event.'+op,eid)
-        return {'message':'已报名，分组后的赛事对战将自动建立' if op=='join' else '已退出报名'}
+        return {'message':'已报名，赛程生成后可查看对阵' if op=='join' else '已退出报名'}
     require(u['role']=='admin','需要管理员权限',403)
     if op=='seeds':
         require(e['status']=='open','分组后不能修改种子',409)
@@ -117,6 +153,7 @@ def action(c,u,eid,op,b):
         for s in seeds:c.execute('UPDATE event_entries SET seed=? WHERE event_id=? AND user_id=?',(s['seed'],eid,s['user_id']))
     elif op=='draw':
         require(e['status']=='open','分组已生成',409)
+        require(e['qualifiers']!=0 or not registration_open(e),'尚未到赛事开赛时间',409)
         c.execute('DELETE FROM event_entries WHERE event_id=? AND user_id IN (SELECT id FROM users WHERE active=0)',(eid,))
         entries=c.execute('SELECT * FROM event_entries WHERE event_id=? ORDER BY seed,id',(eid,)).fetchall()
         require(len(entries)>=2*e['group_count'],'每组至少需要两人，请增加报名人数或减少小组数')
@@ -130,6 +167,7 @@ def action(c,u,eid,op,b):
             for a,bid in itertools.combinations(ids,2):fixture(c,e,a,bid,'group',group=g)
         c.execute("UPDATE events SET status='groups' WHERE id=?",(eid,))
     elif op=='advance':
+        require(e['qualifiers']!=0,'大循环赛事按循环赛排名完赛',409)
         require(e['status']=='groups','当前不在小组赛阶段',409)
         unfinished=c.execute("SELECT count(*) FROM event_matches x JOIN matches m ON m.id=x.match_id WHERE x.event_id=? AND x.phase='group' AND m.status!='completed'",(eid,)).fetchone()[0]
         require(not unfinished,'小组赛全部确认赛果后才能生成淘汰赛',409)
@@ -155,7 +193,11 @@ def action(c,u,eid,op,b):
         require(e['status']!='cancelled','赛事已取消',409)
         reason=text(b.get('reason'),'取消原因',200,4)
         c.execute("UPDATE matches SET status=CASE WHEN status='completed' THEN 'voided' ELSE 'cancelled' END,void_reason=? WHERE id IN (SELECT match_id FROM event_matches WHERE event_id=?)",(reason,eid))
-        c.execute("UPDATE events SET status='cancelled',cancel_reason=? WHERE id=?",(reason,eid));ratings.request_rebuild(c)
+        c.execute("UPDATE events SET status='cancelled',cancel_reason=? WHERE id=?",(reason,eid))
+        if c.execute('SELECT 1 FROM event_matches x JOIN rating_log l ON l.match_id=x.match_id WHERE x.event_id=? LIMIT 1',(eid,)).fetchone():
+            ratings.request_rebuild(c)
     else:raise AppError('未知赛事操作')
     audit(c,u['id'],'event.'+op,eid)
+    if op=='draw' and e['qualifiers']==0:
+        return {'message':'大循环赛程已生成'}
     return {'message':{'draw':'分组与小组循环赛已生成','advance':'淘汰赛已生成，胜者将自动晋级下一轮','cancel':'赛事已取消，相关赛果已作废，积分将在00:00统一重算','seeds':'种子设置已保存'}.get(op,'已保存')}

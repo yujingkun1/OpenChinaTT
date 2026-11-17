@@ -97,3 +97,6 @@ def init():
         if 'title' not in {r['name'] for r in c.execute('PRAGMA table_info(users)')}:
             c.execute("ALTER TABLE users ADD COLUMN title TEXT NOT NULL DEFAULT ''")
         c.execute('INSERT OR IGNORE INTO schema_versions VALUES(5)')
+        if 'rating_ceiling' not in {r['name'] for r in c.execute('PRAGMA table_info(events)')}:
+            c.execute('ALTER TABLE events ADD COLUMN rating_ceiling INTEGER')
+        c.execute('INSERT OR IGNORE INTO schema_versions VALUES(6)')

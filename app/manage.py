@@ -7,8 +7,9 @@ from app.security import digest,hash_password
 
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument('command',choices=['init','bootstrap','backup','settle'])
+    p.add_argument('command',choices=['init','bootstrap','backup','settle','start-round-robin'])
     p.add_argument('--output')
+    p.add_argument('--event-id',type=int)
     args = p.parse_args()
     db.init()
     if args.command=='bootstrap':
@@ -26,6 +27,13 @@ def main():
         with db.transaction() as c:
             count=settle_due(c)
         print(json.dumps({'settled_matches':count}))
+    if args.command=='start-round-robin':
+        if not args.event_id:
+            p.error('--event-id required')
+        from app.events import start_round_robin
+        with db.transaction() as c:
+            result = start_round_robin(c,args.event_id)
+        print(json.dumps(result,ensure_ascii=False))
     if args.command=='backup':
         if not args.output:
             p.error('--output required')
