@@ -30,3 +30,9 @@
 .event-matrix .matrix-win{background:#e2efdb;color:#254b31}
 .event-matrix .matrix-loss{background:#f8e5df;color:#904631}
 .event-matrix .matrix-pending{background:#f4f4ee;color:#777}
+
+.event-matrix .matrix-record,.event-matrix .matrix-score{width:100%;min-height:48px;border:0;border-radius:6px;background:transparent;color:inherit;font:inherit;cursor:pointer}
+.event-matrix .matrix-record{display:flex;align-items:center;justify-content:center;gap:4px;background:#e2efdb;color:#254b31;font-size:12px;font-weight:600}
+.event-matrix .matrix-record svg{width:14px;height:14px}
+.event-matrix button:focus-visible{outline:2px solid #154b3f;outline-offset:2px}
+.event-matrix .matrix-score:hover,.event-matrix .matrix-record:hover{background:#d1e5c8}
