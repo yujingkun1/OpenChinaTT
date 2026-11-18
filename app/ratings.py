@@ -15,7 +15,8 @@ def replay(c):
         settle(c, m)
 
 def settle(c, m):
-    if m['winner_id'] is None:
+    if m['winner_id'] is None or m['forfeit_reason']:
+        c.execute('UPDATE matches SET a_before=NULL,b_before=NULL,a_delta=0,b_delta=0 WHERE id=?',(m['id'],))
         return
     a = c.execute('SELECT rating FROM users WHERE id=?', (m['a_id'],)).fetchone()['rating']
     b = c.execute('SELECT rating FROM users WHERE id=?', (m['b_id'],)).fetchone()['rating']

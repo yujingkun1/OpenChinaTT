@@ -219,7 +219,7 @@ def action(c,u,eid,op,b):
         if changed:
             match_changed(c,changed[-1])
         audit(c,u['id'],'event.absent',json.dumps({'event_id':eid,'user_ids':sorted(set(ids)),'reason':reason,'match_ids':changed},ensure_ascii=False))
-        return {'message':f'缺席已标记，{len(changed)}场对战已判负，积分将在00:00结算','affected_matches':len(changed)}
+        return {'message':f'缺席已标记，{len(changed)}场对战已判负；弃权双方个人积分不变','affected_matches':len(changed)}
     if op=='seeds':
         require(e['status']=='open','分组后不能修改种子',409)
         seeds=b.get('seeds');require(isinstance(seeds,list) and len(seeds)<=128,'种子格式错误')

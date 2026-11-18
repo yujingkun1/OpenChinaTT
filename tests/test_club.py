@@ -449,7 +449,29 @@ class ClubTests(unittest.TestCase):
         self.assertEqual(self.rating(2),1500)
         self.assertEqual(self.call(f'/events/{eid}/absent',{'user_ids':[2],'reason':'未到场'},1)['affected_matches'],0)
         self.assertEqual(self.settle(),2)
-        self.assertLess(self.rating(2),1500)
+        self.assertEqual(self.rating(2),1500)
+        with db.connect() as c:
+            self.assertEqual(c.execute('SELECT count(*) FROM rating_log').fetchone()[0],0)
+
+    def test_replay_removes_previously_settled_forfeit_points(self):
+        eid=self.event(1,1,[2,3,4])
+        self.call(f'/events/{eid}/draw',{},1)
+        self.call(f'/events/{eid}/absent',{'user_ids':[2],'reason':'未到场'},1)
+        self.settle()
+        with db.transaction() as c:
+            forfeits=c.execute("SELECT * FROM matches WHERE forfeit_reason!=''").fetchall()
+            # Recreate the old rule's settled deltas and logs on this fixture.
+            for m in forfeits:
+                a,b=m['a_id'],m['b_id']
+                da=8 if m['winner_id']==a else -8
+                for uid,d in [(a,da),(b,-da)]:
+                    c.execute('UPDATE users SET rating=rating+? WHERE id=?',(d,uid))
+                    c.execute('INSERT INTO rating_log(user_id,match_id,before_rating,delta,after_rating) VALUES(?,?,?,?,?)',(uid,m['id'],1500,d,1500+d))
+                c.execute('UPDATE matches SET a_delta=?,b_delta=? WHERE id=?',(da,-da,m['id']))
+            ratings.replay(c)
+            self.assertEqual(c.execute('SELECT count(*) FROM rating_log').fetchone()[0],0)
+            self.assertTrue(all(r['rating']==1500 for r in c.execute('SELECT rating FROM users')))
+            self.assertTrue(all(r['a_delta']==r['b_delta']==0 for r in c.execute("SELECT * FROM matches WHERE forfeit_reason!=''")))
 
     def test_both_absent_record_losses_without_creating_a_winner(self):
         eid=self.event(1,1,[2,3,4])
