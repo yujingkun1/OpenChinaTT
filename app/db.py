@@ -100,3 +100,8 @@ def init():
         if 'rating_ceiling' not in {r['name'] for r in c.execute('PRAGMA table_info(events)')}:
             c.execute('ALTER TABLE events ADD COLUMN rating_ceiling INTEGER')
         c.execute('INSERT OR IGNORE INTO schema_versions VALUES(6)')
+        if 'absent_reason' not in {r['name'] for r in c.execute('PRAGMA table_info(event_entries)')}:
+            c.execute("ALTER TABLE event_entries ADD COLUMN absent_reason TEXT NOT NULL DEFAULT ''")
+        if 'forfeit_reason' not in {r['name'] for r in c.execute('PRAGMA table_info(matches)')}:
+            c.execute("ALTER TABLE matches ADD COLUMN forfeit_reason TEXT NOT NULL DEFAULT ''")
+        c.execute('INSERT OR IGNORE INTO schema_versions VALUES(7)')

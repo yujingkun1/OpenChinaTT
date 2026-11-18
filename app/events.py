@@ -1,4 +1,5 @@
 import itertools
+import json
 import random
 from datetime import datetime,timezone
 from app import accounts,ratings
@@ -61,7 +62,7 @@ def fixture(c,e,a,b,phase,group=None,round_no=None,slot=None):
     return mid
 
 def standings(c,eid,group):
-    entrants=[dict(r) for r in c.execute('SELECT e.user_id,e.seed,e.id entry_id,u.name,u.avatar_version FROM event_entries e JOIN users u ON u.id=e.user_id WHERE event_id=? AND group_no=?',(eid,group))]
+    entrants=[dict(r) for r in c.execute('SELECT e.user_id,e.seed,e.id entry_id,e.absent_reason,u.name,u.avatar_version FROM event_entries e JOIN users u ON u.id=e.user_id WHERE event_id=? AND group_no=?',(eid,group))]
     rows={p['user_id']:dict(p,played=0,wins=0,game_diff=0,point_diff=0,tie_wins=0) for p in entrants}
     ms=c.execute("SELECT m.* FROM event_matches x JOIN matches m ON m.id=x.match_id WHERE x.event_id=? AND x.group_no=? AND x.phase='group' AND m.status='completed'",(eid,group)).fetchall()
     import json
@@ -71,8 +72,8 @@ def standings(c,eid,group):
         for uid,sg,pdiff in [(m['a_id'],m['score_a']-m['score_b'],pd),(m['b_id'],m['score_b']-m['score_a'],-pd)]:
             r=rows[uid];r['played']+=1;r['wins']+=int(m['winner_id']==uid);r['game_diff']+=sg;r['point_diff']+=pdiff
     for m in ms:
-        if rows[m['a_id']]['wins']==rows[m['b_id']]['wins']:rows[m['winner_id']]['tie_wins']+=1
-    return sorted(rows.values(),key=lambda r:(-r['wins'],-r['tie_wins'],-r['game_diff'],-r['point_diff'],r['seed'] or 999999,r['entry_id']))
+        if m['winner_id'] and rows[m['a_id']]['wins']==rows[m['b_id']]['wins']:rows[m['winner_id']]['tie_wins']+=1
+    return sorted(rows.values(),key=lambda r:(bool(r['absent_reason']),-r['wins'],-r['tie_wins'],-r['game_diff'],-r['point_diff'],r['seed'] or 999999,r['entry_id']))
 
 def progress(c,eid):
     e=get(c,eid)
@@ -104,7 +105,8 @@ def match_changed(c,mid):
     if event['qualifiers'] == 0 and event['status'] == 'groups':
         unfinished = c.execute("SELECT 1 FROM event_matches x JOIN matches m ON m.id=x.match_id WHERE x.event_id=? AND m.status!='completed' LIMIT 1",(eid,)).fetchone()
         if not unfinished:
-            champion = standings(c,eid,0)[0]['user_id']
+            eligible = [p for p in standings(c,eid,0) if not p['absent_reason']]
+            champion = eligible[0]['user_id'] if eligible else None
             c.execute("UPDATE events SET status='completed',champion_id=? WHERE id=?",(champion,eid))
         return
     progress(c,eid)
@@ -140,6 +142,39 @@ def action(c,u,eid,op,b):
         audit(c,u['id'],'event.'+op,eid)
         return {'message':'已报名，赛程生成后可查看对阵' if op=='join' else '已退出报名'}
     require(u['role']=='admin','需要管理员权限',403)
+    if op=='absent':
+        require(e['status']=='groups','只能在循环赛进行中标记缺席',409)
+        require(datetime.now(timezone.utc)>=datetime.fromisoformat(e['starts_at']),'开赛后才能标记缺席',409)
+        ids=b.get('user_ids')
+        require(isinstance(ids,list) and 1<=len(ids)<=128 and all(type(uid)==int for uid in ids),'请选择缺席球员')
+        reason=text(b.get('reason'),'缺席原因',200,2)
+        for uid in set(ids):
+            require(c.execute('SELECT 1 FROM event_entries WHERE event_id=? AND user_id=?',(eid,uid)).fetchone(),'只能标记已报名的球员')
+            c.execute('UPDATE event_entries SET absent_reason=? WHERE event_id=? AND user_id=?',(reason,eid,uid))
+        absent={r['user_id'] for r in c.execute("SELECT user_id FROM event_entries WHERE event_id=? AND absent_reason!=''",(eid,))}
+        fixtures=c.execute("SELECT m.* FROM matches m JOIN event_matches x ON x.match_id=m.id WHERE x.event_id=? AND x.phase='group' AND (m.status='accepted' OR (m.status='completed' AND m.forfeit_reason!='')) ORDER BY m.id",(eid,)).fetchall()
+        changed=[]
+        for m in fixtures:
+            a_absent=m['a_id'] in absent
+            b_absent=m['b_id'] in absent
+            if not (a_absent or b_absent):
+                continue
+            winner=None if a_absent and b_absent else (m['b_id'] if a_absent else m['a_id'])
+            if m['forfeit_reason'] and m['winner_id']==winner:
+                continue
+            target=m['best_of']//2+1
+            score_a=target if winner==m['a_id'] else 0
+            score_b=target if winner==m['b_id'] else 0
+            label='双方缺席，双方判负' if winner is None else '管理员标记缺席，弃权判负'
+            # No played rallies are invented for an administrative forfeit.
+            c.execute("UPDATE matches SET status='completed',score_a=?,score_b=?,games='[]',winner_id=?,reporter_id=NULL,forfeit_reason=?,confirmed_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?",(score_a,score_b,winner,label,m['id']))
+            if m['settled_at']:
+                ratings.request_rebuild(c)
+            changed.append(m['id'])
+        if changed:
+            match_changed(c,changed[-1])
+        audit(c,u['id'],'event.absent',json.dumps({'event_id':eid,'user_ids':sorted(set(ids)),'reason':reason,'match_ids':changed},ensure_ascii=False))
+        return {'message':f'缺席已标记，{len(changed)}场对战已判负，积分将在00:00结算','affected_matches':len(changed)}
     if op=='seeds':
         require(e['status']=='open','分组后不能修改种子',409)
         seeds=b.get('seeds');require(isinstance(seeds,list) and len(seeds)<=128,'种子格式错误')
@@ -172,7 +207,7 @@ def action(c,u,eid,op,b):
         unfinished=c.execute("SELECT count(*) FROM event_matches x JOIN matches m ON m.id=x.match_id WHERE x.event_id=? AND x.phase='group' AND m.status!='completed'",(eid,)).fetchone()[0]
         require(not unfinished,'小组赛全部确认赛果后才能生成淘汰赛',409)
         q=b.get('qualifiers',e['qualifiers']);require(type(q)==int and 1<=q<=8,'晋级人数应为1–8')
-        groups=[standings(c,eid,g) for g in range(e['group_count'])]
+        groups=[[p for p in standings(c,eid,g) if not p['absent_reason']] for g in range(e['group_count'])]
         require(all(len(g)>=q for g in groups),'晋级人数超过某组人数')
         qualifiers=[g[place]['user_id'] for place in range(q) for g in groups]
         require(len(qualifiers)>=2,'淘汰赛至少需要两人')

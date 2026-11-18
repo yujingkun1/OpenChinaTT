@@ -15,6 +15,8 @@ def replay(c):
         settle(c, m)
 
 def settle(c, m):
+    if m['winner_id'] is None:
+        return
     a = c.execute('SELECT rating FROM users WHERE id=?', (m['a_id'],)).fetchone()['rating']
     b = c.execute('SELECT rating FROM users WHERE id=?', (m['b_id'],)).fetchone()['rating']
     a_win = m['winner_id']==m['a_id']

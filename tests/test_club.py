@@ -354,5 +354,47 @@ class ClubTests(unittest.TestCase):
         after=self.call('/analytics',uid=None)
         self.assertEqual(after['risers'][0]['delta'],8)
         self.assertEqual(after['fallers'][0]['delta'],-8)
+    def test_event_absence_forfeits_pending_only_and_settles_at_midnight(self):
+        eid=self.event(1,1,[2,3,4,5])
+        self.call(f'/events/{eid}/draw',{},1)
+        event=self.call(f'/events/{eid}',uid=None)
+        reported=next(m for m in event['matches'] if {m['a_id'],m['b_id']}=={2,3})
+        self.report(reported['id'],reported['a_id'])
+        with self.assertRaises(AppError):
+            self.call(f'/events/{eid}/absent',{'user_ids':[2],'reason':'未到场'},3)
+        with self.assertRaises(AppError):
+            self.call(f'/events/{eid}/absent',{'user_ids':[6],'reason':'未到场'},1)
+        result=self.call(f'/events/{eid}/absent',{'user_ids':[2],'reason':'报名后未到场'},1)
+        self.assertEqual(result['affected_matches'],2)
+        event=self.call(f'/events/{eid}',uid=None)
+        for m in event['matches']:
+            if m['forfeit_reason']:
+                self.assertNotEqual(m['winner_id'],2)
+                self.assertEqual(sorted([m['score_a'],m['score_b']]),[0,2])
+                self.assertEqual(json.loads(m['games']),[])
+                self.assertIsNone(m['settled_at'])
+        self.assertEqual(next(m for m in event['matches'] if m['id']==reported['id'])['status'],'reported')
+        self.assertEqual(self.rating(2),1500)
+        self.assertEqual(self.call(f'/events/{eid}/absent',{'user_ids':[2],'reason':'未到场'},1)['affected_matches'],0)
+        self.assertEqual(self.settle(),2)
+        self.assertLess(self.rating(2),1500)
+
+    def test_both_absent_record_losses_without_creating_a_winner(self):
+        eid=self.event(1,1,[2,3,4])
+        self.call(f'/events/{eid}/draw',{},1)
+        self.call(f'/events/{eid}/absent',{'user_ids':[2],'reason':'未到场'},1)
+        self.call(f'/events/{eid}/absent',{'user_ids':[3],'reason':'未到场'},1)
+        event=self.call(f'/events/{eid}',uid=None)
+        pair=next(m for m in event['matches'] if {m['a_id'],m['b_id']}=={2,3})
+        self.assertEqual(pair['status'],'completed')
+        self.assertIsNone(pair['winner_id'])
+        self.assertEqual([pair['score_a'],pair['score_b']],[0,0])
+        table=event['groups'][0]['standings']
+        self.assertEqual(next(p for p in table if p['user_id']==2)['wins'],0)
+        self.assertEqual(next(p for p in table if p['user_id']==3)['wins'],0)
+        self.settle()
+        with db.connect() as c:
+            self.assertEqual(c.execute('SELECT count(*) FROM rating_log WHERE match_id=?',(pair['id'],)).fetchone()[0],0)
+        self.call('/analytics',uid=None)
 
 if __name__=='__main__':unittest.main()
