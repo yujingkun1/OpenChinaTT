@@ -143,7 +143,7 @@ function eventMatrix(event){
         const content=`<strong>${score[0]}∶${score[1]}</strong><small>${result}${match.forfeit_reason?' · 弃权':match.status==='reported'?' · 已录入':''}</small>`;
         return `<td class="${result==='胜'?'matrix-win':'matrix-loss'}">${own?`<button class="matrix-score" data-action="matrix-view" data-id="${match.id}" aria-label="查看${esc(row.name)}对${esc(col.name)}的成绩">${content}</button>`:content}</td>`;
     };
-    return `<section class="panel"><div class="panel-title"><h2>实时比分表</h2></div><p class="hint">点击自己对战的「录入」填写成绩，已有比分可点击查看。比分以行球员为准，横向滑动查看，每15秒同步。</p><div class="table-wrap"><table class="event-matrix"><thead><tr><th scope="col">球员 / 对手</th>${players.map(p=>`<th scope="col">${esc(p.name)}</th>`).join('')}</tr></thead><tbody>${players.map(p=>`<tr><th scope="row">${esc(p.name)}${p.absent_reason?'<small>缺席</small>':''}</th>${players.map(q=>cell(p,q)).join('')}</tr>`).join('')}</tbody></table></div></section>`;
+    return `<section class="panel event-matrix-panel"><div class="panel-title"><h2>实时比分表</h2></div><p class="hint">点击自己对战的「录入」填写成绩，已有比分可点击查看。比分以行球员为准，横向滑动查看，每15秒同步。</p><div class="table-wrap"><table class="event-matrix"><thead><tr><th scope="col">球员 / 对手</th>${players.map(p=>`<th scope="col">${esc(p.name)}</th>`).join('')}</tr></thead><tbody>${players.map(p=>`<tr><th scope="row">${esc(p.name)}${p.absent_reason?'<small>缺席</small>':''}</th>${players.map(q=>cell(p,q)).join('')}</tr>`).join('')}</tbody></table></div></section>`;
 }
 function editEventResult(mid,eid){
     const match=activeEvent?.matches.find(m=>m.id===mid)||findSingleMatch(mid);
