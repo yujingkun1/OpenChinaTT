@@ -40,4 +40,18 @@
 .event-matrix .matrix-record svg{width:13px;height:13px}
 .event-matrix button:focus-visible{outline:2px solid #154b3f;outline-offset:2px}
 .event-matrix .matrix-score:hover,.event-matrix .matrix-record:hover{background:#dce9d1}
-@media(max-width:600px){.event-matrix-panel{padding:0 16px 16px}.event-matrix-panel .panel-title{padding-top:20px}.event-matrix-panel>.hint{font-size:10px;margin-bottom:15px}.event-matrix th,.event-matrix td{min-width:96px}}
+@media(max-width:600px){
+.event-matrix-panel{padding:0 12px 12px}
+.event-matrix-panel .panel-title{padding-top:17px;padding-bottom:8px}
+.event-matrix-panel>.hint{font-size:10px;margin-bottom:12px;line-height:1.7}
+.event-matrix-panel .table-wrap{padding:3px;border-radius:10px}
+.event-matrix{table-layout:fixed;width:max-content;border-spacing:3px}
+.event-matrix th,.event-matrix td{width:64px;min-width:64px;max-width:64px;height:54px;padding:4px;border-radius:6px}
+.event-matrix th{font-size:10px;overflow:hidden;text-overflow:ellipsis}
+.event-matrix th:first-child{width:72px;min-width:72px;max-width:72px}
+.event-matrix strong{font-size:14px}
+.event-matrix small{font-size:9px;margin-top:1px;line-height:1.4}
+.event-matrix .matrix-record,.event-matrix .matrix-score{min-height:44px;padding:4px 2px;border-radius:5px}
+.event-matrix .matrix-record{font-size:10px;gap:3px}
+.event-matrix .matrix-record svg{width:11px;height:11px}
+}

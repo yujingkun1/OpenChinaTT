@@ -109,3 +109,29 @@ def init():
             c.execute('ALTER TABLE matches ADD COLUMN reported_at TEXT')
             c.execute("UPDATE matches SET reported_at=coalesce((SELECT max(a.created_at) FROM audit a WHERE a.action='match.report' AND a.target=cast(matches.id AS TEXT)),strftime('%Y-%m-%dT%H:%M:%fZ','now')) WHERE status='reported'")
         c.execute('INSERT OR IGNORE INTO schema_versions VALUES(8)')
+        c.executescript('''
+        CREATE TABLE IF NOT EXISTS event_revisions(event_id INTEGER PRIMARY KEY REFERENCES events(id),version INTEGER NOT NULL DEFAULT 0);
+        INSERT OR IGNORE INTO event_revisions(event_id) SELECT id FROM events;
+        CREATE TRIGGER IF NOT EXISTS event_revision_create AFTER INSERT ON events BEGIN
+          INSERT INTO event_revisions(event_id) VALUES(new.id);
+        END;
+        CREATE TRIGGER IF NOT EXISTS event_revision_update AFTER UPDATE ON events BEGIN
+          UPDATE event_revisions SET version=version+1 WHERE event_id=new.id;
+        END;
+        CREATE TRIGGER IF NOT EXISTS event_revision_match AFTER UPDATE ON matches BEGIN
+          UPDATE event_revisions SET version=version+1 WHERE event_id IN (SELECT event_id FROM event_matches WHERE match_id=new.id);
+        END;
+        CREATE TRIGGER IF NOT EXISTS event_revision_fixture AFTER INSERT ON event_matches BEGIN
+          UPDATE event_revisions SET version=version+1 WHERE event_id=new.event_id;
+        END;
+        CREATE TRIGGER IF NOT EXISTS event_revision_entry_insert AFTER INSERT ON event_entries BEGIN
+          UPDATE event_revisions SET version=version+1 WHERE event_id=new.event_id;
+        END;
+        CREATE TRIGGER IF NOT EXISTS event_revision_entry_update AFTER UPDATE ON event_entries BEGIN
+          UPDATE event_revisions SET version=version+1 WHERE event_id=new.event_id;
+        END;
+        CREATE TRIGGER IF NOT EXISTS event_revision_entry_delete AFTER DELETE ON event_entries BEGIN
+          UPDATE event_revisions SET version=version+1 WHERE event_id=old.event_id;
+        END;
+        INSERT OR IGNORE INTO schema_versions VALUES(9);
+        ''')

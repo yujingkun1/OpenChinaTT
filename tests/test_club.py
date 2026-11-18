@@ -10,6 +10,8 @@ from pathlib import Path
 from app import api,config,db,events,ratings
 from app.security import hash_password,digest,AppError
 from app.server import application
+from app.server import event_stream
+from unittest.mock import patch
 
 class ClubTests(unittest.TestCase):
     def setUp(self):
@@ -354,6 +356,28 @@ class ClubTests(unittest.TestCase):
         after=self.call('/analytics',uid=None)
         self.assertEqual(after['risers'][0]['delta'],8)
         self.assertEqual(after['fallers'][0]['delta'],-8)
+    def test_event_stream_emits_only_committed_changes_and_idle_keepalives(self):
+        eid=self.event(1,1,[2,3])
+        self.call(f'/events/{eid}/draw',{},1)
+        event=self.call(f'/events/{eid}',uid=None)
+        m=event['matches'][0]
+        stream=event_stream(eid)
+        first=next(stream)
+        self.assertEqual(first,f'data: {event["revision"]}\n\n'.encode())
+        with patch('app.server.threading.Event'):
+            self.assertEqual(next(stream),b': keepalive\n\n')
+        self.report(m['id'],m['a_id'])
+        with patch('app.server.threading.Event'):
+            update=next(stream)
+        self.assertTrue(update.startswith(b'data: '))
+        self.assertNotEqual(first,update)
+        stream.close()
+        revision=self.call(f'/events/{eid}',uid=None)['revision']
+        with self.assertRaises(RuntimeError):
+            with db.transaction() as c:
+                c.execute('UPDATE events SET title=? WHERE id=?',('事务回滚测试',eid))
+                raise RuntimeError()
+        self.assertEqual(self.call(f'/events/{eid}',uid=None)['revision'],revision)
     def test_event_report_is_live_and_auto_confirmed_before_midnight_settlement(self):
         eid=self.event(1,1,[2,3])
         self.call(f'/events/{eid}/draw',{},1)

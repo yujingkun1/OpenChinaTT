@@ -19,6 +19,21 @@ logging.basicConfig(level=logging.INFO,format='%(message)s')
 COOKIE = 'leeds_tt_session'
 PUBLIC = config.ROOT/'public'
 
+def event_stream(eid):
+    """Send committed event revisions. Idle streams only emit keepalive comments."""
+    previous = None
+    for tick in range(55):
+        with db.connect() as c:
+            row = c.execute('SELECT version FROM event_revisions WHERE event_id=?',(eid,)).fetchone()
+        if not row:
+            return
+        if row['version'] != previous:
+            previous = row['version']
+            yield f'data: {previous}\n\n'.encode()
+        elif tick % 10 == 0:
+            yield b': keepalive\n\n'
+        threading.Event().wait(1)
+
 def application(environ,start_response):
     request_id = secrets.token_hex(8)
     method = environ.get('REQUEST_METHOD','GET')
@@ -28,6 +43,15 @@ def application(environ,start_response):
     status = 200
     try:
         require(raw_path.startswith(config.BASE+'/') or raw_path==config.BASE,'页面不存在',404)
+        stream = re.fullmatch(r'/api/events/(\d+)/stream',path)
+        if stream:
+            require(method=='GET','方法不允许',405)
+            eid=int(stream[1])
+            with db.connect() as c:
+                require(c.execute('SELECT 1 FROM events WHERE id=?',(eid,)).fetchone(),'赛事不存在',404)
+            headers.extend([('Content-Type','text/event-stream'),('Cache-Control','no-cache, no-transform'),('X-Accel-Buffering','no')])
+            start_response('200 OK',headers)
+            return event_stream(eid)
         is_api = path.startswith('/api/')
         if method in ['GET','HEAD'] and re.fullmatch(r'/api/avatars/\d+/[a-f0-9]{20}\.jpg',path):
             _,_,_,pid,filename=path.split('/')

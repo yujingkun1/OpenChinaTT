@@ -26,6 +26,7 @@ def registration_open(event):
 def public(c,eid):
     e=dict(get(c,eid))
     e['registration_open'] = registration_open(e)
+    e['revision'] = c.execute('SELECT version FROM event_revisions WHERE event_id=?',(eid,)).fetchone()[0]
     e['entries']=[dict(r) for r in c.execute('SELECT e.*,u.name,u.avatar_version,u.rating FROM event_entries e JOIN users u ON u.id=e.user_id WHERE event_id=? ORDER BY coalesce(seed,999999),e.id',(eid,))]
     e['matches']=[dict(r) for r in c.execute('''SELECT m.*,a.name a_name,b.name b_name,a.avatar_version a_avatar_version,b.avatar_version b_avatar_version,x.event_id,x.phase,x.group_no,x.round_no,x.slot FROM event_matches x JOIN matches m ON m.id=x.match_id JOIN users a ON a.id=m.a_id JOIN users b ON b.id=m.b_id WHERE x.event_id=? ORDER BY x.phase,x.group_no,x.round_no,x.slot,m.id''',(eid,))]
     e['groups']=[{'number':i,'standings':standings(c,eid,i)} for i in range(e['group_count'])] if any(p['group_no'] is not None for p in e['entries']) else []
