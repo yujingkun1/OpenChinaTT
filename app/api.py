@@ -48,8 +48,9 @@ def handle(method,path,body,user,session,query):
                 p = c.execute('SELECT * FROM users WHERE id=?',(pid,)).fetchone()
                 require(p,'球友不存在',404)
                 history = rows(c,MATCH_SELECT+" WHERE status IN ('completed','voided') AND (a_id=? OR b_id=?) ORDER BY confirmed_at DESC,m.id DESC LIMIT 100",(pid,pid))
-                logs = rows(c,'SELECT * FROM rating_log WHERE user_id=? ORDER BY id',(pid,))
-                return dict(player=accounts.public(p),matches=history,history=logs),None
+                logs = rows(c,'SELECT l.*,m.confirmed_at AS effective_at FROM rating_log l JOIN matches m ON m.id=l.match_id WHERE l.user_id=? ORDER BY l.id',(pid,))
+                inactivity = rows(c,'SELECT * FROM inactivity_log WHERE user_id=? ORDER BY due_at',(pid,))
+                return dict(player=accounts.public(p),matches=history,history=logs,inactivity=inactivity),None
             if path=='/matches':
                 result = rows(c,MATCH_SELECT+" WHERE status IN ('completed','voided') ORDER BY confirmed_at DESC,m.id DESC LIMIT 200")
                 return {'matches':result},None

@@ -44,6 +44,11 @@ CREATE TABLE IF NOT EXISTS doubles_consents(
 );
 CREATE INDEX IF NOT EXISTS doubles_status ON doubles_matches(status);
 CREATE TABLE IF NOT EXISTS rating_log(id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id), match_id INTEGER NOT NULL REFERENCES matches(id), before_rating INTEGER NOT NULL, delta INTEGER NOT NULL, after_rating INTEGER NOT NULL, UNIQUE(user_id,match_id));
+CREATE TABLE IF NOT EXISTS inactivity_log(
+ user_id INTEGER NOT NULL REFERENCES users(id), due_at TEXT NOT NULL,
+ before_rating INTEGER NOT NULL, delta INTEGER NOT NULL, after_rating INTEGER NOT NULL,
+ PRIMARY KEY(user_id,due_at)
+);
 CREATE TABLE IF NOT EXISTS codes(email TEXT PRIMARY KEY COLLATE NOCASE, code_hash TEXT NOT NULL, expires REAL NOT NULL, attempts INTEGER NOT NULL DEFAULT 0, sent_at REAL NOT NULL);
 CREATE TABLE IF NOT EXISTS rate_limits(key TEXT PRIMARY KEY, count INTEGER NOT NULL, reset_at REAL NOT NULL);
 CREATE TABLE IF NOT EXISTS audit(id INTEGER PRIMARY KEY, actor_id INTEGER REFERENCES users(id), action TEXT NOT NULL, target TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')));
@@ -134,4 +139,5 @@ def init():
           UPDATE event_revisions SET version=version+1 WHERE event_id=old.event_id;
         END;
         INSERT OR IGNORE INTO schema_versions VALUES(9);
+        INSERT OR IGNORE INTO schema_versions VALUES(10);
         ''')

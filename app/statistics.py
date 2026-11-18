@@ -38,7 +38,10 @@ def collect(c):
     individual.sort(key=lambda p:(-p['rate'],-p['played'],-p['wins'],p['player']['id']))
     cutoff=(datetime.now(timezone.utc)-timedelta(days=14)).isoformat(timespec='milliseconds').replace('+00:00','Z')
     changes=[]
-    for r in c.execute('''SELECT l.user_id,sum(l.delta) delta,count(*) played FROM rating_log l JOIN matches m ON m.id=l.match_id WHERE m.settled_at>=? GROUP BY l.user_id''',(cutoff,)):
+    for r in c.execute('''SELECT user_id,sum(delta) delta,sum(played) played FROM (
+        SELECT l.user_id,l.delta,1 played FROM rating_log l JOIN matches m ON m.id=l.match_id WHERE m.settled_at>=?
+        UNION ALL SELECT user_id,delta,0 played FROM inactivity_log WHERE due_at>=?
+    ) GROUP BY user_id''',(cutoff,cutoff)):
         if r['user_id'] in players:changes.append(dict(player=players[r['user_id']],delta=r['delta'],played=r['played']))
     return {
         'activity':sorted([a for a in activity.values() if a['played']],key=lambda x:(-x['played'],x['id']))[:100],
@@ -47,5 +50,5 @@ def collect(c):
         'risers':sorted([x for x in changes if x['delta']>0],key=lambda x:(-x['delta'],-x['played'],x['player']['id']))[:100],
         'fallers':sorted([x for x in changes if x['delta']<0],key=lambda x:(x['delta'],-x['played'],x['player']['id']))[:100],
         'doubles_combos':combos[:100],'doubles_players':individual[:100],'window_days':14,
-        'policy':'胜率以已确认且未作废比赛计算，至少1场，显示样本数；同胜率场次多者优先。近两周为最近14天按积分结算时间统计的单打积分净变化。'
+        'policy':'胜率以已确认且未作废比赛计算，至少1场，显示样本数；同胜率场次多者优先。近两周净变化含比赛加减分和未参赛扣分。'
     }

@@ -356,6 +356,42 @@ class ClubTests(unittest.TestCase):
         after=self.call('/analytics',uid=None)
         self.assertEqual(after['risers'][0]['delta'],8)
         self.assertEqual(after['fallers'][0]['delta'],-8)
+
+    def test_inactivity_uses_calendar_months_and_charges_each_month_once(self):
+        with db.transaction() as c:
+            # January 31 at 20:00 Shanghai is due at midnight after February 28.
+            c.execute("UPDATE users SET created_at='2026-04-01T01:00:00.000Z'")
+            c.execute("UPDATE users SET created_at='2026-01-31T12:00:00.000Z' WHERE id=2")
+            ratings.settle_due(c,datetime.fromisoformat('2026-02-28T23:59:00+08:00'))
+            self.assertEqual(c.execute('SELECT count(*) FROM inactivity_log').fetchone()[0],0)
+            boundary = datetime.fromisoformat('2026-03-01T00:00:00+08:00')
+            ratings.settle_due(c,boundary)
+            ratings.settle_due(c,boundary)
+            ratings.settle_due(c,datetime.fromisoformat('2026-04-01T00:00:00+08:00'))
+            ratings.replay(c)
+        profile=self.call('/players/2',uid=None)
+        self.assertEqual(profile['player']['rating'],1460)
+        self.assertEqual([(r['due_at'],r['delta'],r['after_rating']) for r in profile['inactivity']], [
+            ('2026-02-28T16:00:00.000Z',-20,1480),('2026-03-31T16:00:00.000Z',-20,1460),
+        ])
+
+    def test_completed_singles_and_doubles_reset_inactivity_but_forfeits_do_not(self):
+        mid=self.match(a=2,b=3)
+        self.report(mid)
+        self.call(f'/matches/{mid}',{'action':'confirm'},3)
+        with db.transaction() as c:
+            c.execute("UPDATE users SET created_at='2026-01-01T01:00:00.000Z' WHERE id IN (1,2,3,4,5,6)")
+            at='2026-01-25T12:00:00.000Z'
+            c.execute('UPDATE matches SET confirmed_at=? WHERE id=?',(at,mid))
+            c.execute("INSERT INTO doubles_matches(a1,a2,b1,b2,status,best_of,venue,scheduled_at,confirmed_at,score_a,score_b) VALUES(1,4,5,6,'completed',3,'测试球馆',?,?,2,0)",(at,at))
+            c.execute("INSERT INTO matches(a_id,b_id,status,best_of,venue,scheduled_at,confirmed_at,winner_id,forfeit_reason) VALUES(2,3,'completed',3,'测试球馆',?,?,3,'缺席')",('2026-02-10T12:00:00.000Z',)*2)
+            boundary=datetime.fromisoformat('2026-02-23T00:00:00+08:00')
+            ratings.settle_due(c,boundary)
+            self.assertEqual(c.execute('SELECT count(*) FROM inactivity_log').fetchone()[0],0)
+            self.assertEqual([r[0] for r in c.execute('SELECT rating FROM users ORDER BY id')],[1500,1508,1492,1500,1500,1500])
+            ratings.settle_due(c,datetime.fromisoformat('2026-02-26T00:00:00+08:00'))
+            self.assertEqual(c.execute('SELECT count(*) FROM inactivity_log').fetchone()[0],6)
+        self.assertEqual(self.rating(2),1488)
     def test_event_stream_emits_only_committed_changes_and_idle_keepalives(self):
         eid=self.event(1,1,[2,3])
         self.call(f'/events/{eid}/draw',{},1)
