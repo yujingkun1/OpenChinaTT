@@ -354,6 +354,54 @@ class ClubTests(unittest.TestCase):
         after=self.call('/analytics',uid=None)
         self.assertEqual(after['risers'][0]['delta'],8)
         self.assertEqual(after['fallers'][0]['delta'],-8)
+    def test_event_report_is_live_and_auto_confirmed_before_midnight_settlement(self):
+        eid=self.event(1,1,[2,3])
+        self.call(f'/events/{eid}/draw',{},1)
+        m=self.call(f'/events/{eid}',uid=None)['matches'][0]
+        self.report(m['id'],m['a_id'])
+        event=self.call(f'/events/{eid}',uid=None)
+        self.assertEqual(event['groups'][0]['standings'][0]['wins'],1)
+        self.assertEqual(event['matches'][0]['status'],'reported')
+        with db.transaction() as c:
+            self.assertEqual(ratings.settle_due(c),0)
+            old=(datetime.now(timezone.utc)-timedelta(days=2)).isoformat(timespec='milliseconds').replace('+00:00','Z')
+            c.execute('UPDATE matches SET reported_at=? WHERE id=?',(old,m['id']))
+            self.assertEqual(ratings.settle_due(c),1)
+            self.assertEqual(ratings.settle_due(c),0)
+            result=c.execute('SELECT * FROM matches WHERE id=?',(m['id'],)).fetchone()
+            self.assertEqual(result['status'],'completed')
+            self.assertTrue(result['settled_at'])
+        self.assertEqual(self.rating(m['a_id']),1508)
+
+    def test_admin_corrects_settled_event_score_and_rebuilds_at_midnight(self):
+        eid=self.event(1,1,[2,3])
+        self.call(f'/events/{eid}/draw',{},1)
+        m=self.call(f'/events/{eid}',uid=None)['matches'][0]
+        self.finish_fixture(m)
+        self.settle()
+        body={'match_id':m['id'],'games':[[4,11],[5,11]],'reason':'双方比分录反'}
+        with self.assertRaises(AppError):self.call(f'/events/{eid}/result',body,2)
+        self.call(f'/events/{eid}/result',body,1)
+        self.assertEqual(self.rating(m['a_id']),1508)
+        self.settle()
+        self.assertEqual(self.rating(m['a_id']),1492)
+        self.assertEqual(self.call(f'/events/{eid}',uid=None)['matches'][0]['winner_id'],m['b_id'])
+
+    def test_admin_group_correction_archives_old_knockout_results(self):
+        eid=self.event(2,1)
+        self.call(f'/events/{eid}/draw',{},1)
+        event=self.call(f'/events/{eid}',uid=None)
+        for m in event['matches']:self.finish_fixture(m)
+        self.call(f'/events/{eid}/advance',{'qualifiers':1},1)
+        event=self.call(f'/events/{eid}',uid=None)
+        final=next(m for m in event['matches'] if m['phase']=='knockout')
+        self.finish_fixture(final)
+        group=next(m for m in event['matches'] if m['phase']=='group')
+        self.call(f'/events/{eid}/result',{'match_id':group['id'],'games':[[4,11],[5,11]],'reason':'更正小组赛果'},1)
+        event=self.call(f'/events/{eid}',uid=None)
+        self.assertEqual(event['status'],'groups')
+        self.assertEqual(event['bracket'],[])
+        self.assertEqual(next(m for m in event['matches'] if m['id']==final['id'])['status'],'voided')
     def test_event_absence_forfeits_pending_only_and_settles_at_midnight(self):
         eid=self.event(1,1,[2,3,4,5])
         self.call(f'/events/{eid}/draw',{},1)

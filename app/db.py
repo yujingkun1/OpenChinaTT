@@ -105,3 +105,7 @@ def init():
         if 'forfeit_reason' not in {r['name'] for r in c.execute('PRAGMA table_info(matches)')}:
             c.execute("ALTER TABLE matches ADD COLUMN forfeit_reason TEXT NOT NULL DEFAULT ''")
         c.execute('INSERT OR IGNORE INTO schema_versions VALUES(7)')
+        if 'reported_at' not in {r['name'] for r in c.execute('PRAGMA table_info(matches)')}:
+            c.execute('ALTER TABLE matches ADD COLUMN reported_at TEXT')
+            c.execute("UPDATE matches SET reported_at=coalesce((SELECT max(a.created_at) FROM audit a WHERE a.action='match.report' AND a.target=cast(matches.id AS TEXT)),strftime('%Y-%m-%dT%H:%M:%fZ','now')) WHERE status='reported'")
+        c.execute('INSERT OR IGNORE INTO schema_versions VALUES(8)')

@@ -32,6 +32,14 @@ def settle_due(c):
     from zoneinfo import ZoneInfo
     midnight=datetime.now(ZoneInfo('Asia/Shanghai')).replace(hour=0,minute=0,second=0,microsecond=0)
     cutoff=midnight.astimezone(timezone.utc).isoformat(timespec='milliseconds').replace('+00:00','Z')
+    # Event reports require only one scorer. Finalize earlier reports in this
+    # transaction before settling them, using their report time for ordering.
+    from app import events
+    pending=c.execute("SELECT m.id,m.reported_at FROM matches m JOIN event_matches x ON x.match_id=m.id JOIN events e ON e.id=x.event_id WHERE m.status='reported' AND m.reported_at < ? AND e.status!='cancelled' ORDER BY m.reported_at,m.id",(cutoff,)).fetchall()
+    for m in pending:
+        c.execute("UPDATE matches SET status='completed',confirmed_at=reported_at WHERE id=?",(m['id'],))
+        c.execute("INSERT INTO audit(action,target) VALUES('event.auto-confirm',?)",(str(m['id']),))
+        events.match_changed(c,m['id'])
     if c.execute("SELECT value FROM settings WHERE key='rating_rebuild_pending' AND value < ?",(cutoff,)).fetchone():
         replay(c)
         c.execute("DELETE FROM settings WHERE key='rating_rebuild_pending'")

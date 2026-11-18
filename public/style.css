@@ -20,3 +20,13 @@
 @media(max-width:600px){.section-heading h2{font-size:21px}.section-heading p{font-size:10px}.analytics-grid{gap:17px}.stat-list{padding:0 18px 5px}.stat-item{padding:16px 0;gap:9px}.stat-item>strong{font-size:19px}.stat-item .relation{font-size:12px}.stat-item .player-name small{font-size:10px}.stat-item .relation small{font-size:10px}.board .panel-title p{font-size:10px}.event-entry{padding:17px;gap:10px}.event-entry strong{font-size:15px}.event-entry small{font-size:9px}.event-entry-icon{padding:10px}.event-entry>.link{font-size:10px}.event-entry>.link svg{width:15px}.event-card{padding:22px}.event-card h2{font-size:19px}.event-toolbar .btn{min-height:42px}.duo-team a{font-size:11px;gap:6px}.duo-team .avatar{width:27px;height:27px;font-size:9px}.doubles-vs .vs-score{font-size:21px}.stats-tabs{justify-content:flex-start!important}.stats-tabs .tab{padding:10px 15px!important;flex-shrink:0}.entrant-list{padding:0 18px 20px;gap:17px}.champion-banner{font-size:18px;padding:21px}.event-fixtures{gap:15px}.section-heading{margin-top:27px}}
 .board .empty{padding:20px 14px}.board .empty-icon{display:none}.board .empty h3{font-size:12px}.board .empty p{font-size:10px}.event-fixtures .side span{overflow-wrap:anywhere}.event-toolbar .hint{line-height:1.9}
 .player-title{display:inline-flex;align-items:center;gap:4px;max-width:100%;font-size:10px;font-weight:500;background:#f1efdc;color:#8a8150;border:1px solid #e7e1bd;padding:3px 8px;border-radius:5px;line-height:1.5;margin:5px 0 3px;overflow-wrap:anywhere}.player-title:before{content:'✦';font-size:8px;color:#aea167}.my-title{display:flex;align-items:center;gap:9px;flex-wrap:wrap;margin:2px 0 5px}.my-title .link{font-size:10px}.my-title .link svg{width:12px;height:12px}.profile-hero .player-title{margin-top:0}
+
+.event-matrix{min-width:100%;border-collapse:separate;border-spacing:2px;text-align:center}
+.event-matrix th,.event-matrix td{min-width:86px;height:64px;padding:8px;text-align:center;white-space:nowrap}
+.event-matrix th{font-size:12px;background:var(--paper,#f5f4eb)}
+.event-matrix tbody th{position:sticky;left:0;z-index:1;box-shadow:2px 0 4px #0001}
+.event-matrix small{display:block;font-size:11px;font-weight:400}
+.event-matrix .matrix-diagonal{background:linear-gradient(45deg,#e2e5dd 49%,#8b9688 50%,#e2e5dd 51%);color:transparent}
+.event-matrix .matrix-win{background:#e2efdb;color:#254b31}
+.event-matrix .matrix-loss{background:#f8e5df;color:#904631}
+.event-matrix .matrix-pending{background:#f4f4ee;color:#777}

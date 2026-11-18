@@ -41,19 +41,9 @@ def action(c,u,mid,b):
     elif act=='report':
         require(m['status']=='accepted','需双方同意对战后再提交赛果',409)
         games = b.get('games')
-        require(isinstance(games,list) and 1<=len(games)<=m['best_of'],'请填写每局比分')
-        a,bw = 0,0
-        target = m['best_of']//2+1
-        for game in games:
-            require(isinstance(game,list) and len(game)==2 and all(type(x)==int and 0<=x<=199 for x in game),'单局比分必须为0–199的整数')
-            x,y = game
-            require(max(x,y)>=11 and ((max(x,y)==11 and min(x,y)<=9) or (min(x,y)>=10 and abs(x-y)==2)),'单局需11分获胜，10平后领先2分获胜')
-            require(a<target and bw<target,'比赛已分出胜负，不应再有后续局')
-            a += x>y
-            bw += y>x
-        require(max(a,bw)==target,'完整赛果需达到赛制规定的胜局数')
+        a,bw = validate_games(games,m['best_of'])
         winner = m['a_id'] if a>bw else m['b_id']
-        c.execute("UPDATE matches SET status='reported',score_a=?,score_b=?,games=?,reporter_id=?,winner_id=? WHERE id=?",(a,bw,json.dumps(games),u['id'],winner,mid))
+        c.execute("UPDATE matches SET status='reported',score_a=?,score_b=?,games=?,reporter_id=?,winner_id=?,reported_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?",(a,bw,json.dumps(games),u['id'],winner,mid))
     elif act in ['confirm','reject']:
         require(m['status']=='reported','赛果状态已改变，请刷新',409)
         require(u['id']!=m['reporter_id'],'请等待另一方确认赛果',403)
@@ -62,8 +52,24 @@ def action(c,u,mid,b):
             from app.events import match_changed
             match_changed(c,mid)
         else:
-            c.execute("UPDATE matches SET status='accepted',score_a=NULL,score_b=NULL,games=NULL,reporter_id=NULL,winner_id=NULL WHERE id=?",(mid,))
+            c.execute("UPDATE matches SET status='accepted',score_a=NULL,score_b=NULL,games=NULL,reporter_id=NULL,winner_id=NULL,reported_at=NULL WHERE id=?",(mid,))
     else:
         raise AppError('未知操作')
     audit(c,u['id'],'match.'+act,mid)
+    if act=='report' and c.execute('SELECT 1 FROM event_matches WHERE match_id=?',(mid,)).fetchone():
+        return {'message':'赛事成绩已录入，比分表已更新，未确认成绩将在00:00自动确认并结算'}
     return {'message':{'confirm':'赛果已确认，积分将在北京时间00:00统一结算','reject':'已退回赛果，请重新协商','accept':'已接受邀请，祝比赛愉快'}.get(act,'操作成功')}
+
+def validate_games(games,best_of):
+    require(isinstance(games,list) and 1<=len(games)<=best_of,'请填写每局比分')
+    a,bw = 0,0
+    target = best_of//2+1
+    for game in games:
+        require(isinstance(game,list) and len(game)==2 and all(type(x)==int and 0<=x<=199 for x in game),'单局比分必须为0–199的整数')
+        x,y = game
+        require(max(x,y)>=11 and ((max(x,y)==11 and min(x,y)<=9) or (min(x,y)>=10 and abs(x-y)==2)),'单局需11分获胜，10平后领先2分获胜')
+        require(a<target and bw<target,'比赛已分出胜负，不应再有后续局')
+        a += x>y
+        bw += y>x
+    require(max(a,bw)==target,'完整赛果需达到赛制规定的胜局数')
+    return a,bw

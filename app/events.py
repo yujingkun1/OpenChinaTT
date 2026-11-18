@@ -64,7 +64,7 @@ def fixture(c,e,a,b,phase,group=None,round_no=None,slot=None):
 def standings(c,eid,group):
     entrants=[dict(r) for r in c.execute('SELECT e.user_id,e.seed,e.id entry_id,e.absent_reason,u.name,u.avatar_version FROM event_entries e JOIN users u ON u.id=e.user_id WHERE event_id=? AND group_no=?',(eid,group))]
     rows={p['user_id']:dict(p,played=0,wins=0,game_diff=0,point_diff=0,tie_wins=0) for p in entrants}
-    ms=c.execute("SELECT m.* FROM event_matches x JOIN matches m ON m.id=x.match_id WHERE x.event_id=? AND x.group_no=? AND x.phase='group' AND m.status='completed'",(eid,group)).fetchall()
+    ms=c.execute("SELECT m.* FROM event_matches x JOIN matches m ON m.id=x.match_id WHERE x.event_id=? AND x.group_no=? AND x.phase='group' AND m.status IN ('completed','reported')",(eid,group)).fetchall()
     import json
     for m in ms:
         games=json.loads(m['games'])
@@ -128,6 +128,47 @@ def guard_void(c,mid):
     linked=c.execute('SELECT x.phase,e.status,e.qualifiers FROM event_matches x JOIN events e ON e.id=x.event_id WHERE x.match_id=?',(mid,)).fetchone()
     if linked:require(linked['qualifiers']!=0 and linked['phase']=='group' and linked['status']=='groups','此赛事赛果不能单独作废；可在赛事管理中取消整场赛事',409)
 
+def correct_result(c,u,e,body):
+    from app.matches import validate_games
+    mid=body.get('match_id')
+    require(type(mid)==int,'请选择赛事对战')
+    match=c.execute('SELECT m.*,x.phase,x.round_no,x.slot FROM matches m JOIN event_matches x ON x.match_id=m.id WHERE x.event_id=? AND m.id=?',(e['id'],mid)).fetchone()
+    require(match and match['status'] in ['accepted','reported','completed'],'只能修改有效的赛事对战',409)
+    reason=text(body.get('reason'),'修改原因',200,2)
+    games=body.get('games')
+    a,b=validate_games(games,match['best_of'])
+    winner=match['a_id'] if a>b else match['b_id']
+    changed=match['winner_id']!=winner
+    eid=e['id']
+    if (changed or games!=json.loads(match['games'] or '[]')) and match['phase']=='group' and c.execute('SELECT 1 FROM event_bracket WHERE event_id=?',(eid,)).fetchone():
+        # Archive dependent results, then let the administrator draw qualifiers
+        # again from the corrected group standings. Original scores stay stored.
+        c.execute("UPDATE matches SET status=CASE WHEN status='completed' THEN 'voided' ELSE 'cancelled' END,void_reason=? WHERE id IN (SELECT match_id FROM event_matches WHERE event_id=? AND phase='knockout')",('小组赛果更正，原淘汰赛对阵失效：'+reason,eid))
+        c.execute('DELETE FROM event_bracket WHERE event_id=?',(eid,))
+        c.execute("UPDATE events SET status='groups',champion_id=NULL WHERE id=?",(eid,))
+        ratings.request_rebuild(c)
+    elif changed and match['phase']=='knockout':
+        rnd,slot=match['round_no'],match['slot']
+        while True:
+            rnd,slot=rnd+1,slot//2
+            row=c.execute('SELECT * FROM event_bracket WHERE event_id=? AND round_no=? AND slot=?',(eid,rnd,slot)).fetchone()
+            if not row:
+                break
+            if row['match_id']:
+                c.execute("UPDATE matches SET status=CASE WHEN status='completed' THEN 'voided' ELSE 'cancelled' END,void_reason=? WHERE id=?",('前轮赛果更正，原对阵失效：'+reason,row['match_id']))
+            c.execute('UPDATE event_bracket SET a_id=NULL,b_id=NULL,winner_id=NULL,match_id=NULL WHERE event_id=? AND round_no=? AND slot=?',(eid,rnd,slot))
+        c.execute('UPDATE event_bracket SET winner_id=? WHERE event_id=? AND match_id=?',(winner,eid,mid))
+        c.execute("UPDATE events SET status='knockout',champion_id=NULL WHERE id=?",(eid,))
+        ratings.request_rebuild(c)
+    if e['qualifiers']==0:
+        c.execute("UPDATE events SET status='groups',champion_id=NULL WHERE id=?",(eid,))
+    c.execute("UPDATE matches SET status='completed',score_a=?,score_b=?,games=?,winner_id=?,reporter_id=?,forfeit_reason='',confirmed_at=coalesce(confirmed_at,strftime('%Y-%m-%dT%H:%M:%fZ','now')),reported_at=coalesce(reported_at,strftime('%Y-%m-%dT%H:%M:%fZ','now')) WHERE id=?",(a,b,json.dumps(games),winner,u['id'],mid))
+    if match['settled_at']:
+        ratings.request_rebuild(c)
+    audit(c,u['id'],'event.result-correct',json.dumps({'event_id':eid,'match_id':mid,'reason':reason,'before':{'score_a':match['score_a'],'score_b':match['score_b'],'games':match['games'],'winner_id':match['winner_id']},'after':{'games':games,'winner_id':winner}},ensure_ascii=False))
+    match_changed(c,mid)
+    return {'message':'成绩已修改，比分表已更新，个人积分将在00:00结算或重算'}
+
 def action(c,u,eid,op,b):
     e=get(c,eid)
     if op in ['join','leave']:
@@ -142,6 +183,9 @@ def action(c,u,eid,op,b):
         audit(c,u['id'],'event.'+op,eid)
         return {'message':'已报名，赛程生成后可查看对阵' if op=='join' else '已退出报名'}
     require(u['role']=='admin','需要管理员权限',403)
+    if op=='result':
+        require(e['status']!='cancelled','赛事已取消',409)
+        return correct_result(c,u,e,b)
     if op=='absent':
         require(e['status']=='groups','只能在循环赛进行中标记缺席',409)
         require(datetime.now(timezone.utc)>=datetime.fromisoformat(e['starts_at']),'开赛后才能标记缺席',409)
